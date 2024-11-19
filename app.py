@@ -4,23 +4,43 @@ from tensorflow.keras.models import load_model
 import numpy as np
 import cv2
 import os
+import logging
 
 # Initialize the Flask app
 app = Flask(__name__)
 
+# Set up logging for better error tracking
+logging.basicConfig(level=logging.INFO)
+
 # Load the trained model
 MODEL_PATH = 'brain_tumor_detector.h5'  # Ensure this file is in the same directory or provide the correct path
-model = load_model(MODEL_PATH)
+if not os.path.exists(MODEL_PATH):
+    logging.error("Model file not found!")
+    raise FileNotFoundError(f"Model file '{MODEL_PATH}' not found.")
+
+try:
+    model = load_model(MODEL_PATH)
+    logging.info("Model loaded successfully.")
+except Exception as e:
+    logging.error(f"Error loading model: {str(e)}")
+    raise e
 
 # Preprocessing function for uploaded images
 def preprocess_image(image_path):
-    img = cv2.imread(image_path)
-    img = cv2.resize(img, (128, 128))  # Resize to match the model's input shape
-    b, g, r = cv2.split(img)
-    img = cv2.merge([r, g, b])  # Convert BGR to RGB
-    img = img / 255.0  # Normalize to [0, 1]
-    img = np.expand_dims(img, axis=0)  # Add batch dimension
-    return img
+    try:
+        img = cv2.imread(image_path)
+        if img is None:
+            raise ValueError("Unable to read image.")
+        
+        img = cv2.resize(img, (128, 128))  # Resize to match the model's input shape
+        b, g, r = cv2.split(img)
+        img = cv2.merge([r, g, b])  # Convert BGR to RGB
+        img = img / 255.0  # Normalize to [0, 1]
+        img = np.expand_dims(img, axis=0)  # Add batch dimension
+        return img
+    except Exception as e:
+        logging.error(f"Error during image preprocessing: {str(e)}")
+        raise e
 
 # Define the /predict endpoint
 @app.route('/predict', methods=['POST'])
@@ -34,15 +54,16 @@ def predict():
 
     # Save the uploaded file temporarily
     temp_path = 'temp_uploaded_image.jpg'
-    file.save(temp_path)
-
     try:
+        file.save(temp_path)
+        logging.info(f"File saved temporarily at {temp_path}")
+        
         # Preprocess the uploaded image
         image = preprocess_image(temp_path)
 
         # Predict using the model
         prediction = model.predict(image)[0][0]
-
+        
         # Remove the temporary file
         os.remove(temp_path)
 
@@ -52,7 +73,9 @@ def predict():
             'confidence': float(prediction) if prediction > 0.5 else float(1 - prediction)
         }
         return jsonify(result)
+
     except Exception as e:
+        logging.error(f"Error during prediction: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 # Define a healthcheck endpoint
@@ -61,7 +84,9 @@ def healthcheck():
     return jsonify({'status': 'API is running successfully!'})
 
 # Run the Flask app
-import os
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))  # Use PORT from environment or default to 5000
-    app.run(host="0.0.0.0", port=port)
+    try:
+        app.run(host="0.0.0.0", port=port)
+    except Exception as e:
+        logging.error(f"Error starting the app: {str(e)}")
